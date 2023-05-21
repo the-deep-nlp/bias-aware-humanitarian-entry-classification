@@ -127,6 +127,12 @@ ordered_classification_results = [
     "Avg f_score",
 ]
 
+clean_classification_task_names = {
+    "sectors": "Sectors",
+    "pillars_1d": "Pillars 1D",
+    "pillars_2d": "Pillars 2D",
+}
+
 label_ticks = {
     "pillars_1d": sorted(
         [
@@ -165,114 +171,6 @@ label_ticks = {
         ]
     ),
 }
-
-
-def generate_probability_discrepancy_results(
-    llm_models: List[str],
-    training_setups: List[str],
-    training_architectures: List[str],
-    folder_name: str,
-):
-    final_results_df = pd.DataFrame()
-
-    with tqdm(
-        total=len(llm_models) * len(training_setups) * len(training_architectures)
-    ) as pbar:
-        for one_llm in llm_models:
-            for one_training_setup in training_setups:
-                for one_training_architecture in training_architectures:
-                    distances = {}
-                    for one_protected_attribute in ["gender", "country"]:
-                        df = pd.read_csv(
-                            os.path.join(
-                                folder_name,
-                                one_llm,
-                                one_training_setup,
-                                one_training_architecture,
-                                "predictions_discrepency",
-                                f"{one_llm}_{one_training_setup}_{one_training_architecture}_{one_protected_attribute}_predictions_discrepency.csv",
-                            )
-                        )
-
-                        df["index_col"] = df["entry_id"].apply(str) + df[
-                            "kword_type"
-                        ].apply(lambda x: literal_eval(x)[0])
-                        df.sort_values(by=["index_col"], inplace=True)
-                        df["kword_type"] = df["kword_type"].apply(
-                            lambda x: literal_eval(x)[0]
-                        )
-
-                        n_ids = df.entry_id.nunique()
-
-                        keywords_one_protected_attribute = mappings[
-                            one_protected_attribute
-                        ]
-                        shifts = defaultdict(lambda: defaultdict(list))
-
-                        for i in range(0, len(df), 3):
-                            df_one_entry = df.iloc[i : i + 3]
-                            assert (
-                                df_one_entry.entry_id.nunique() == 1
-                            ), "issue with df entry id"
-
-                            for (
-                                name,
-                                kwords,
-                            ) in keywords_one_protected_attribute.items():
-                                base_kword = kwords[0]
-                                counterfactual_kword = kwords[1]
-
-                                base_df = df_one_entry[
-                                    df_one_entry.kword_type == base_kword
-                                ]
-                                counterfactual_df = df_one_entry[
-                                    df_one_entry.kword_type == counterfactual_kword
-                                ]
-                                for one_tag in tags:
-                                    dist = (
-                                        counterfactual_df[
-                                            f"probability_{one_tag}"
-                                        ].values[0]
-                                        - base_df[f"probability_{one_tag}"].values[0]
-                                    )
-
-                                    shifts[name][one_tag].append(np.abs(dist))
-
-                        shifts = {
-                            name: np.sum(
-                                [
-                                    np.sum(all_distances_one_tag)
-                                    for tag, all_distances_one_tag in tagwise_distances.items()
-                                ]
-                            )
-                            / n_ids
-                            for name, tagwise_distances in shifts.items()
-                        }
-                        shifts[
-                            f"{one_protected_attribute[0].capitalize()}-Avg"
-                        ] = np.mean(list(shifts.values()))
-                        distances.update(shifts)
-
-                    final_results_df = final_results_df.append(
-                        dict(
-                            list(
-                                {
-                                    "Measurement": "Probability Discepancy",
-                                    "LLM": one_llm,
-                                    "Model": f"{mapping_training_architecture2name[one_training_architecture]}-{mapping_training_type_to_name[one_training_setup]}",
-                                }.items()
-                            )
-                            + list(distances.items())
-                            + list({"T-Avg": np.mean(list(distances.values()))}.items())
-                        ),
-                        ignore_index=True,
-                    )
-
-                    pbar.update(1)
-
-    final_results_df = final_results_df[sorted_columns]
-    final_results_df
-    return final_results_df
 
 
 def get_classification_results(
@@ -332,84 +230,100 @@ def _generate_heatmaps(
     multiplication_factor: int = 1,
 ):
     treated_level0_tags = ["sectors", "pillars_1d", "pillars_2d"]
-    processed_df = df.copy().sort_values(by=["tag", "original->couterfactual"])
-    base_kwords = processed_df.base_kw.unique().tolist()
-    n_base_kwords = len(base_kwords)
-
-    processed_df = processed_df[
-        processed_df.tag.apply(
-            lambda x: any(
-                [f"first_level_tags->{one_tag}" in x for one_tag in treated_level0_tags]
-            )
-        )
-    ]
-    processed_df[heatmap_col] = (
-        multiplication_factor * processed_df[heatmap_col]
-    ).round(3)
-
-    min_val = min(processed_df[heatmap_col].min(), -1e-7)
-    max_val = processed_df[heatmap_col].max()
-    norm = mcolors.TwoSlopeNorm(vmin=min_val, vcenter=0, vmax=max_val)
-
+    original_df = df.copy().sort_values(by=["tag", "original->couterfactual"])
+    n_base_kwords = 7
     f, axes = plt.subplots(
         n_base_kwords,
         len(treated_level0_tags),
         sharey=False,
         sharex=False,
         figsize=(20, 6),
-        gridspec_kw={"width_ratios": [1.4, 0.9, 0.8]},
+        gridspec_kw={
+            "width_ratios": [1.4, 0.9, 0.8],
+            "height_ratios": [1, 1, 1, 0.05, 1, 1, 1],
+        },
     )
+    axes[3, 0].set_visible(False)
+    axes[3, 1].set_visible(False)
+    axes[3, 2].set_visible(False)
 
-    for i, one_base_kw in enumerate(base_kwords):
-        one_kw_df = processed_df[processed_df.base_kw == one_base_kw]
+    min_val = min(original_df[heatmap_col].min(), -1e-7)
+    max_val = original_df[heatmap_col].max()
+    norm = mcolors.TwoSlopeNorm(vmin=min_val, vcenter=0, vmax=max_val)
 
-        one_kw_df = one_kw_df.pivot(
-            index="tag", columns="original->couterfactual", values=heatmap_col
-        )
-        for j, one_tag in enumerate(treated_level0_tags):
-            one_tag_results = (
-                one_kw_df[
-                    one_kw_df.index.to_series().apply(
-                        lambda x: f"first_level_tags->{one_tag}" in x
-                    )
-                ]
-                .copy()
-                .T
+    bias_attributes = ["gender", "country"]
+    for bias_attr_count, one_bias_attribute in enumerate(bias_attributes):
+        processed_df = original_df[original_df.bias_attribute == one_bias_attribute]
+        base_kwords = processed_df.base_kw.unique().tolist()
+        # n_base_kwords = len(base_kwords)
+
+        processed_df = processed_df[
+            processed_df.tag.apply(
+                lambda x: any(
+                    [
+                        f"first_level_tags->{one_tag}" in x
+                        for one_tag in treated_level0_tags
+                    ]
+                )
             )
+        ]
+        processed_df[heatmap_col] = (
+            multiplication_factor * processed_df[heatmap_col]
+        ).round(3)
 
-            xticks = label_ticks[one_tag]
-            # print(xticks)
-            cbar_ax = f.add_axes([0.91, 0.15, 0.03, 0.7])
-            g = sns.heatmap(
-                one_tag_results,
-                cmap="coolwarm",
-                # cbar=True if i == len(treated_level0_tags) - 1 else False,
-                cbar_ax=cbar_ax,
-                ax=axes[i, j],
-                # vmin=-max_abs if min_val<0 else 0,
-                vmin=min_val,
-                vmax=max_val,
-                norm=norm,
-                annot=True,
-                xticklabels=xticks,
-                # linewidths=0.1,
-                annot_kws={"fontsize": 10},
+        for i, one_base_kw in enumerate(base_kwords):
+            final_axis_label = i + 3 * bias_attr_count
+            if bias_attr_count:
+                final_axis_label += 1
+            one_kw_df = processed_df[processed_df.base_kw == one_base_kw]
+
+            one_kw_df = one_kw_df.pivot(
+                index="tag", columns="original->couterfactual", values=heatmap_col
             )
-            if j != 0:
-                g.get_yaxis().set_visible(False)
-            if i != 2:
-                g.get_xaxis().set_visible(False)
+            for j, one_tag in enumerate(treated_level0_tags):
+                one_tag_results = (
+                    one_kw_df[
+                        one_kw_df.index.to_series().apply(
+                            lambda x: f"first_level_tags->{one_tag}" in x
+                        )
+                    ]
+                    .copy()
+                    .T
+                )
 
-            g.set_ylabel("")
-            g.tick_params(labelsize=15)
-            if i == 2:
-                g.set_xlabel(one_tag, fontsize=18)
-            else:
-                g.set_xlabel("")
+                xticks = label_ticks[one_tag]
+                # print(xticks)
+                cbar_ax = f.add_axes([0.91, 0.15, 0.03, 0.7])
+                g = sns.heatmap(
+                    one_tag_results,
+                    cmap="coolwarm",
+                    # cbar=True if i == len(treated_level0_tags) - 1 else False,
+                    cbar_ax=cbar_ax,
+                    ax=axes[final_axis_label, j],
+                    # vmin=-max_abs if min_val<0 else 0,
+                    vmin=min_val,
+                    vmax=max_val,
+                    norm=norm,
+                    annot=True,
+                    xticklabels=xticks,
+                    # linewidths=0.1,
+                    annot_kws={"fontsize": 10},
+                )
+                if j != 0:
+                    g.get_yaxis().set_visible(False)
+                if final_axis_label != n_base_kwords - 1:
+                    g.get_xaxis().set_visible(False)
 
-            plt.yticks(rotation=0)
+                g.set_ylabel("")
+                g.tick_params(labelsize=15)
+                if final_axis_label == n_base_kwords - 1:
+                    g.set_xlabel(clean_classification_task_names[one_tag], fontsize=18)
+                else:
+                    g.set_xlabel("")
 
-    plt.subplots_adjust(wspace=0.1, hspace=0.3)
+                plt.yticks(rotation=0)
+
+    plt.subplots_adjust(wspace=0.05, hspace=0.3)
 
     if fig_name is not None:
         plt.savefig(fig_name, bbox_inches="tight")
@@ -499,7 +413,7 @@ all_visualized_methods = {
 }
 
 
-def generate_visualizations(
+def generate_tagwise_results(
     llm_models: List[str],
     training_setups: List[str],
     training_architectures: List[str],
@@ -508,6 +422,7 @@ def generate_visualizations(
     folder_name: str,
     save_vizus: bool = True,
 ):
+    results_df_all = pd.DataFrame()
     with tqdm(
         total=len(llm_models)
         * len(training_setups)
@@ -520,6 +435,7 @@ def generate_visualizations(
                 for one_training_architecture in training_architectures:
                     for method in visualized_methods:
                         results_generation_function = all_visualized_methods[method]
+                        results_df_one_run = pd.DataFrame()
                         for protected_attr in protected_attributes:
                             visu_file = os.path.join(
                                 folder_name,
@@ -528,7 +444,6 @@ def generate_visualizations(
                                 training_setup,
                                 one_training_architecture,
                                 method,
-                                protected_attr,
                             )
                             os.makedirs(visu_file, exist_ok=True)
                             results_df_one_method = results_generation_function(
@@ -538,17 +453,33 @@ def generate_visualizations(
                                 folder_name=folder_name,
                                 one_protected_attribute=protected_attr,
                             )
+                            results_df_one_method["bias_attribute"] = protected_attr
+                            results_df_one_method["bias_method"] = method
+                            results_df_one_method[
+                                "training_architecture"
+                            ] = one_training_architecture
+                            results_df_one_method["trainig_setup"] = training_setup
+                            results_df_one_method["llm_model"] = llm_model
 
-                            if save_vizus:
-                                figname = os.path.join(
-                                    visu_file,
-                                    f"{llm_model}_{training_setup}_{one_training_architecture}_{method}_{protected_attr}.png",
-                                )
-                            else:
-                                figname = None
-
-                            _generate_heatmaps(
-                                results_df_one_method,
-                                figname,
+                            results_df_one_run = pd.concat(
+                                [results_df_one_run, results_df_one_method]
+                            )
+                            results_df_all = pd.concat(
+                                [results_df_all, results_df_one_method]
                             )
                             pbar.update(1)
+
+                        if save_vizus:
+                            figname = os.path.join(
+                                visu_file,
+                                f"{llm_model}_{training_setup}_{one_training_architecture}_{method}.png",
+                            )
+                        else:
+                            figname = None
+
+                        _generate_heatmaps(
+                            results_df_one_run,
+                            figname,
+                        )
+
+    return results_df_all
