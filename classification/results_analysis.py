@@ -231,30 +231,26 @@ def _generate_heatmaps(
 ):
     treated_level0_tags = ["sectors", "pillars_1d", "pillars_2d"]
     original_df = df.copy().sort_values(by=["tag", "original->couterfactual"])
-    n_base_kwords = 7
+    # n_base_kwords = 7
     f, axes = plt.subplots(
-        n_base_kwords,
+        2,
         len(treated_level0_tags),
         sharey=False,
         sharex=False,
-        figsize=(20, 6),
+        figsize=(20, 5),
         gridspec_kw={
-            "width_ratios": [1.4, 0.9, 0.8],
-            "height_ratios": [1, 1, 1, 0.05, 1, 1, 1],
+            "width_ratios": [1.4, 0.9, 1.1],
+            # "height_ratios": [1, 1, 1, 0.2, 1, 1, 1],
         },
     )
-    axes[3, 0].set_visible(False)
-    axes[3, 1].set_visible(False)
-    axes[3, 2].set_visible(False)
-
-    min_val = min(original_df[heatmap_col].min(), -1e-7)
-    max_val = original_df[heatmap_col].max()
-    norm = mcolors.TwoSlopeNorm(vmin=min_val, vcenter=0, vmax=max_val)
+    # axes[3, 0].set_visible(False)
+    # axes[3, 1].set_visible(False)
+    # axes[3, 2].set_visible(False)
 
     bias_attributes = ["gender", "country"]
-    for bias_attr_count, one_bias_attribute in enumerate(bias_attributes):
+    for i, one_bias_attribute in enumerate(bias_attributes):
         processed_df = original_df[original_df.bias_attribute == one_bias_attribute]
-        base_kwords = processed_df.base_kw.unique().tolist()
+        # base_kwords = processed_df.base_kw.unique().tolist()
         # n_base_kwords = len(base_kwords)
 
         processed_df = processed_df[
@@ -266,64 +262,71 @@ def _generate_heatmaps(
                     ]
                 )
             )
-        ]
+        ].sort_values(by=["original->couterfactual", "tag"])
+
         processed_df[heatmap_col] = (
             multiplication_factor * processed_df[heatmap_col]
         ).round(3)
 
-        for i, one_base_kw in enumerate(base_kwords):
-            final_axis_label = i + 3 * bias_attr_count
-            if bias_attr_count:
-                final_axis_label += 1
-            one_kw_df = processed_df[processed_df.base_kw == one_base_kw]
+        # for i, one_base_kw in enumerate(base_kwords):
+        # final_axis_label = i + 3 * bias_attr_count
+        # if bias_attr_count:
+        #     final_axis_label += 1
+        # one_kw_df = processed_df[processed_df.base_kw == one_base_kw]
+        # min_val = min(one_kw_df[heatmap_col].min(), -1e-7)
+        # max_val = one_kw_df[heatmap_col].max()
+        # norm = mcolors.TwoSlopeNorm(vmin=min_val, vcenter=0, vmax=max_val)
 
-            one_kw_df = one_kw_df.pivot(
-                index="tag", columns="original->couterfactual", values=heatmap_col
+        one_kw_df = processed_df.pivot(
+            index="tag", columns="original->couterfactual", values=heatmap_col
+        )
+        for j, one_tag in enumerate(treated_level0_tags):
+            one_tag_results = (
+                one_kw_df[
+                    one_kw_df.index.to_series().apply(
+                        lambda x: f"first_level_tags->{one_tag}" in x
+                    )
+                ]
+                .copy()
+                .T
             )
-            for j, one_tag in enumerate(treated_level0_tags):
-                one_tag_results = (
-                    one_kw_df[
-                        one_kw_df.index.to_series().apply(
-                            lambda x: f"first_level_tags->{one_tag}" in x
-                        )
-                    ]
-                    .copy()
-                    .T
-                )
 
-                xticks = label_ticks[one_tag]
-                # print(xticks)
-                cbar_ax = f.add_axes([0.91, 0.15, 0.03, 0.7])
-                g = sns.heatmap(
-                    one_tag_results,
-                    cmap="coolwarm",
-                    # cbar=True if i == len(treated_level0_tags) - 1 else False,
-                    cbar_ax=cbar_ax,
-                    ax=axes[final_axis_label, j],
-                    # vmin=-max_abs if min_val<0 else 0,
-                    vmin=min_val,
-                    vmax=max_val,
-                    norm=norm,
-                    annot=True,
-                    xticklabels=xticks,
-                    # linewidths=0.1,
-                    annot_kws={"fontsize": 10},
-                )
-                if j != 0:
-                    g.get_yaxis().set_visible(False)
-                if final_axis_label != n_base_kwords - 1:
-                    g.get_xaxis().set_visible(False)
+            xticks = label_ticks[one_tag]
+            # print(xticks)
+            # bottom = {0: 20, 1: 10}
 
-                g.set_ylabel("")
-                g.tick_params(labelsize=15)
-                if final_axis_label == n_base_kwords - 1:
-                    g.set_xlabel(clean_classification_task_names[one_tag], fontsize=18)
-                else:
-                    g.set_xlabel("")
+            # cbar_ax = f.add_axes([0.91, 0.15, 0.03, 0.7])
+            # cbar_ax = f.add_axes([0.91, bottom[bias_attr_count], 0.03, 0.7])
+            g = sns.heatmap(
+                one_tag_results,
+                cmap="coolwarm",
+                cbar=True if j == len(treated_level0_tags) - 1 else False,
+                # cbar_ax=cbar_ax,
+                ax=axes[i, j],
+                # vmin=-max_abs if min_val<0 else 0,
+                # vmin=min_val,
+                # vmax=max_val,
+                # norm=norm,
+                annot=True,
+                xticklabels=xticks,
+                # linewidths=0.1,
+                annot_kws={"fontsize": 10},
+            )
+            if j != 0:
+                g.get_yaxis().set_visible(False)
+            if i != 1:
+                g.get_xaxis().set_visible(False)
 
-                plt.yticks(rotation=0)
+            g.set_ylabel("")
+            g.tick_params(labelsize=15)
+            if i == 0:
+                g.set_xlabel(clean_classification_task_names[one_tag], fontsize=18)
+            else:
+                g.set_xlabel("")
 
-    plt.subplots_adjust(wspace=0.05, hspace=0.3)
+            plt.yticks(rotation=0)
+
+    plt.subplots_adjust(wspace=0.05, hspace=0.2)
 
     if fig_name is not None:
         plt.savefig(fig_name, bbox_inches="tight")
@@ -426,7 +429,7 @@ def generate_tagwise_results(
     with tqdm(
         total=len(llm_models)
         * len(training_setups)
-        * len(protected_attributes)
+        # * len(protected_attributes)
         * len(visualized_methods)
         * len(training_architectures)
     ) as pbar:
@@ -467,7 +470,6 @@ def generate_tagwise_results(
                             results_df_all = pd.concat(
                                 [results_df_all, results_df_one_method]
                             )
-                            pbar.update(1)
 
                         if save_vizus:
                             figname = os.path.join(
@@ -481,5 +483,7 @@ def generate_tagwise_results(
                             results_df_one_run,
                             figname,
                         )
+
+                        pbar.update(1)
 
     return results_df_all

@@ -17,8 +17,6 @@ from debiasing_pipelines.counterfactual_prediction_discrepency.counterfactual_pr
     get_probabilities_results,
 )
 
-# from debiasing_pipelines.probing.classifier.model import ProbingClassificationModel
-
 # test set biases import
 from humbias_set_creation.initialize_datasets import (
     _preprocess_df,
