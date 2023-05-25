@@ -172,6 +172,8 @@ label_ticks = {
     ),
 }
 
+treated_level0_tags = ["sectors", "pillars_1d", "pillars_2d"]
+
 
 def get_classification_results(
     llm_models: List[str],
@@ -225,11 +227,11 @@ def _multisets_intersection(set_list: List[Set]):
 
 def _generate_heatmaps(
     df: pd.DataFrame,
+    max_bound: Dict[str, float],
     fig_name: str = None,
     heatmap_col: str = "median_shift",
     multiplication_factor: int = 1,
 ):
-    treated_level0_tags = ["sectors", "pillars_1d", "pillars_2d"]
     original_df = df.copy().sort_values(by=["tag", "original->couterfactual"])
     # n_base_kwords = 7
     f, axes = plt.subplots(
@@ -250,8 +252,12 @@ def _generate_heatmaps(
     bias_attributes = ["gender", "country"]
     for i, one_bias_attribute in enumerate(bias_attributes):
         processed_df = original_df[original_df.bias_attribute == one_bias_attribute]
-        # base_kwords = processed_df.base_kw.unique().tolist()
-        # n_base_kwords = len(base_kwords)
+
+        # one_kw_df[
+        #     one_kw_df.index.to_series().apply(
+        #         lambda x: f"first_level_tags->{one_tag}" in x
+        #     )
+        # ]
 
         processed_df = processed_df[
             processed_df.tag.apply(
@@ -304,8 +310,8 @@ def _generate_heatmaps(
                 # cbar_ax=cbar_ax,
                 ax=axes[i, j],
                 # vmin=-max_abs if min_val<0 else 0,
-                # vmin=min_val,
-                # vmax=max_val,
+                vmin=-max_bound[one_bias_attribute],
+                vmax=max_bound[one_bias_attribute],
                 # norm=norm,
                 annot=True,
                 xticklabels=xticks,
@@ -416,6 +422,45 @@ all_visualized_methods = {
 }
 
 
+# def _get_vizu_bounds(
+#     folder_name,
+#     llm_models,
+#     training_architectures,
+#     protected_attributes,
+#     heatmap_col="median_shift",
+# ):
+#     training_setup = "no_debiasing"
+
+#     for llm_model in llm_models:
+#         for one_training_architecture in training_architectures:
+#             for protected_attr in protected_attributes:
+#                 df = pd.read_csv(
+#                     os.path.join(
+#                         folder_name,
+#                         llm_model,
+#                         training_setup,
+#                         one_training_architecture,
+#                         "predictions_discrepency",
+#                         f"{llm_model}_{training_setup}_{one_training_architecture}_{protected_attr}_predictions_discrepency.csv",
+#                     )
+#                 )
+#                 df = df[
+#                     df.tag.apply(
+#                         lambda x: any(
+#                             [
+#                                 f"first_level_tags->{one_tag}" in x
+#                                 for one_tag in treated_level0_tags
+#                             ]
+#                         )
+#                     )
+#                 ]
+#                 name = f"{llm_model}_{one_training_architecture}_{protected_attr}"
+#                 val = df[heatmap_col].max()
+#                 max_bounds[name] = val
+
+#     return max_bounds
+
+
 def generate_tagwise_results(
     llm_models: List[str],
     training_setups: List[str],
@@ -426,6 +471,13 @@ def generate_tagwise_results(
     save_vizus: bool = True,
 ):
     results_df_all = pd.DataFrame()
+    # max_bounds = _get_vizu_bounds(
+    #     folder_name,
+    #     llm_models,
+    #     training_architectures,
+    #     protected_attributes,
+    # )
+    max_bounds = defaultdict(dict)
     with tqdm(
         total=len(llm_models)
         * len(training_setups)
@@ -464,6 +516,22 @@ def generate_tagwise_results(
                             results_df_one_method["trainig_setup"] = training_setup
                             results_df_one_method["llm_model"] = llm_model
 
+                            if training_setup == "no_debiasing":
+                                df = results_df_one_method.copy()
+                                df = df[
+                                    df.tag.apply(
+                                        lambda x: any(
+                                            [
+                                                f"first_level_tags->{one_tag}" in x
+                                                for one_tag in treated_level0_tags
+                                            ]
+                                        )
+                                    )
+                                ]
+                                name = f"{llm_model}_{one_training_architecture}"
+                                val = df["median_shift"].max()
+                                max_bounds[name][protected_attr] = val
+
                             results_df_one_run = pd.concat(
                                 [results_df_one_run, results_df_one_method]
                             )
@@ -479,8 +547,12 @@ def generate_tagwise_results(
                         else:
                             figname = None
 
+                        max_bound = max_bounds[
+                            f"{llm_model}_{one_training_architecture}"
+                        ]
                         _generate_heatmaps(
                             results_df_one_run,
+                            max_bound,
                             figname,
                         )
 

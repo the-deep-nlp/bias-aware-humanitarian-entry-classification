@@ -28,7 +28,7 @@ BIASES_TYPES = ["gender", "country"]
 
 
 def _preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
-    classification_df = df.copy().drop_duplicates()
+    classification_df = df.copy()  # .drop_duplicates()
     """
     1. clean excerpt
     2. extract gender keywords
